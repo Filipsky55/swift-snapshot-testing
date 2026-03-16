@@ -4,7 +4,7 @@ import Foundation
   import XCTest
 #endif
 
-#if canImport(Testing) && compiler(>=6.2)
+#if !os(Linux) && !os(Android) && !os(Windows) && canImport(Testing) && compiler(>=6.2)
   import Testing
 #endif
 
@@ -12,7 +12,7 @@ import Foundation
 ///
 /// Records attachments asynchronously for better performance with large test suites.
 internal enum STAttachments {
-  #if canImport(Testing) && compiler(>=6.2)
+  #if !os(Linux) && !os(Android) && !os(Windows) && canImport(Testing) && compiler(>=6.2)
     static func record(
       _ data: Data,
       named name: String? = nil,
