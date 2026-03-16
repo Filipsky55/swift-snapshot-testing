@@ -367,29 +367,62 @@ public func verifySnapshot<Value, Format>(
         }
 
         #if !os(Android) && !os(Linux) && !os(Windows)
-          if !isSwiftTesting,
-            ProcessInfo.processInfo.environment.keys.contains("__XCODE_BUILT_PRODUCTS_DIR_PATHS")
-          {
-            XCTContext.runActivity(named: "Attached Recorded Snapshot") { activity in
+          #if canImport(Testing) && compiler(>=6.2)
+            if isSwiftTesting {
+              let attachmentData: Data
               if writeToDisk {
-                // Snapshot was written to disk. Create attachment from file
-                let attachment = XCTAttachment(contentsOfFile: snapshotFileUrl)
-                activity.add(attachment)
+                attachmentData = (try? Data(contentsOf: snapshotFileUrl)) ?? snapshotData
               } else {
-                // Snapshot was not written to disk. Create attachment from data and path extension
-                let typeIdentifier = snapshotting.pathExtension.flatMap(
-                  uniformTypeIdentifier(fromExtension:))
-
-                let attachment = XCTAttachment(
-                  uniformTypeIdentifier: typeIdentifier,
-                  name: snapshotFileUrl.lastPathComponent,
-                  payload: snapshotData
-                )
-
-                activity.add(attachment)
+                attachmentData = snapshotData
+              }
+              STAttachments.record(
+                attachmentData,
+                named: snapshotFileUrl.lastPathComponent,
+                fileID: fileID,
+                filePath: filePath,
+                line: line,
+                column: column
+              )
+            } else if ProcessInfo.processInfo.environment.keys.contains(
+              "__XCODE_BUILT_PRODUCTS_DIR_PATHS")
+            {
+              XCTContext.runActivity(named: "Attached Recorded Snapshot") { activity in
+                if writeToDisk {
+                  let attachment = XCTAttachment(contentsOfFile: snapshotFileUrl)
+                  activity.add(attachment)
+                } else {
+                  let typeIdentifier = snapshotting.pathExtension.flatMap(
+                    uniformTypeIdentifier(fromExtension:))
+                  let attachment = XCTAttachment(
+                    uniformTypeIdentifier: typeIdentifier,
+                    name: snapshotFileUrl.lastPathComponent,
+                    payload: snapshotData
+                  )
+                  activity.add(attachment)
+                }
               }
             }
-          }
+          #else
+            if ProcessInfo.processInfo.environment.keys.contains(
+              "__XCODE_BUILT_PRODUCTS_DIR_PATHS")
+            {
+              XCTContext.runActivity(named: "Attached Recorded Snapshot") { activity in
+                if writeToDisk {
+                  let attachment = XCTAttachment(contentsOfFile: snapshotFileUrl)
+                  activity.add(attachment)
+                } else {
+                  let typeIdentifier = snapshotting.pathExtension.flatMap(
+                    uniformTypeIdentifier(fromExtension:))
+                  let attachment = XCTAttachment(
+                    uniformTypeIdentifier: typeIdentifier,
+                    name: snapshotFileUrl.lastPathComponent,
+                    payload: snapshotData
+                  )
+                  activity.add(attachment)
+                }
+              }
+            }
+          #endif
         #endif
       }
 
@@ -454,15 +487,73 @@ public func verifySnapshot<Value, Format>(
 
       if !attachments.isEmpty {
         #if !os(Linux) && !os(Android) && !os(Windows)
-          if ProcessInfo.processInfo.environment.keys.contains("__XCODE_BUILT_PRODUCTS_DIR_PATHS"),
-            !isSwiftTesting
-          {
-            XCTContext.runActivity(named: "Attached Failure Diff") { activity in
-              attachments.forEach {
-                activity.add($0)
+          #if canImport(Testing) && compiler(>=6.2)
+            if isSwiftTesting {
+              // XCTAttachment doesn't expose its internal data, so we recreate it from the
+              // source values (reference/diffable) based on the attachment name.
+              for attachment in attachments {
+                var attachmentData: Data?
+                var attachmentName: String? = attachment.name
+
+                switch attachment.name {
+                case "reference":
+                  attachmentData = snapshotting.diffing.toData(reference)
+                  attachmentName = "reference.\(snapshotting.pathExtension ?? "data")"
+                case "failure":
+                  attachmentData = snapshotting.diffing.toData(diffable)
+                  attachmentName = "failure.\(snapshotting.pathExtension ?? "data")"
+                case "difference":
+                  #if os(macOS)
+                    if let oldImage = reference as? NSImage, let newImage = diffable as? NSImage {
+                      attachmentData = SnapshotTesting.NSImagePNGRepresentation(
+                        SnapshotTesting.diff(oldImage, newImage))
+                      attachmentName = "difference.\(snapshotting.pathExtension ?? "png")"
+                    }
+                  #elseif os(iOS) || os(tvOS)
+                    if let oldImage = reference as? UIImage, let newImage = diffable as? UIImage {
+                      attachmentData = SnapshotTesting.diff(oldImage, newImage).pngData()
+                      attachmentName = "difference.\(snapshotting.pathExtension ?? "png")"
+                    }
+                  #endif
+                default:
+                  // String diffs and other non-image attachments.
+                  attachmentData = Data(failure.utf8)
+                  if attachmentName == nil {
+                    attachmentName = "difference.patch"
+                  }
+                }
+
+                if let attachmentData = attachmentData {
+                  STAttachments.record(
+                    attachmentData,
+                    named: attachmentName,
+                    fileID: fileID,
+                    filePath: filePath,
+                    line: line,
+                    column: column
+                  )
+                }
+              }
+            } else if ProcessInfo.processInfo.environment.keys.contains(
+              "__XCODE_BUILT_PRODUCTS_DIR_PATHS")
+            {
+              XCTContext.runActivity(named: "Attached Failure Diff") { activity in
+                attachments.forEach {
+                  activity.add($0)
+                }
               }
             }
-          }
+          #else
+            if ProcessInfo.processInfo.environment.keys.contains(
+              "__XCODE_BUILT_PRODUCTS_DIR_PATHS")
+            {
+              XCTContext.runActivity(named: "Attached Failure Diff") { activity in
+                attachments.forEach {
+                  activity.add($0)
+                }
+              }
+            }
+          #endif
         #endif
       }
 
